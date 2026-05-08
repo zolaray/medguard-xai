@@ -1,7 +1,7 @@
 """
 MedGuard-XAI — Clinical Risk Intelligence Dashboard (DEMO MODE)
 NO API KEY REQUIRED — Perfect for SMART Shenzhen submission
-Run: streamlit run dashboard_mock.py
+Live Demo: https://medguard-xai.streamlit.app
 """
 
 import streamlit as st
@@ -11,6 +11,14 @@ import re
 from datetime import datetime
 
 st.set_page_config(page_title="MedGuard-XAI", page_icon="🏥", layout="wide")
+
+# ============================================================
+# INITIALIZE SESSION STATE (FIXED)
+# ============================================================
+if "history" not in st.session_state:
+    st.session_state.history = []
+if "current" not in st.session_state:
+    st.session_state.current = None
 
 # ============================================================
 # MOCK AI FUNCTIONS (No API Key Needed)
@@ -43,6 +51,8 @@ def mock_extract_findings(report_text):
         diagnoses.append("Suspected Meningococcemia")
     if "pneumonia" in report_lower or "lung" in report_lower:
         diagnoses.append("Pneumonia")
+    if "wbc" in report_lower and "elevated" in report_lower:
+        diagnoses.append("Systemic Infection")
     
     # Medications
     medications = []
@@ -75,6 +85,12 @@ def mock_extract_findings(report_text):
     troponin_match = re.search(r'troponin:?\s*([\d.]+)', report_lower)
     if troponin_match:
         labs["Troponin"] = f"{troponin_match.group(1)} ng/mL (elevated)"
+    wbc_match = re.search(r'wbc:?\s*([\d.]+)', report_lower)
+    if wbc_match:
+        labs["WBC"] = f"{wbc_match.group(1)} x10^9/L"
+    crp_match = re.search(r'crp:?\s*([\d.]+)', report_lower)
+    if crp_match:
+        labs["CRP"] = f"{crp_match.group(1)} mg/L"
     
     # Risk flags
     risk_flags = []
@@ -82,6 +98,10 @@ def mock_extract_findings(report_text):
         risk_flags.append("Cardiac risk: Chest pain + metabolic syndrome")
     if "fever" in report_lower and "rash" in report_lower:
         risk_flags.append("Infectious risk: Fever with rash - urgent evaluation needed")
+    if "neck stiffness" in report_lower or "photophobia" in report_lower:
+        risk_flags.append("Neurological risk: Meningeal signs present")
+    if "hypotension" in report_lower or "bp" in report_lower and "95" in report_lower:
+        risk_flags.append("Hemodynamic risk: Hypotension suggestive of sepsis")
     if "inr" in report_lower and ("3." in report_lower or "high" in report_lower):
         risk_flags.append("Bleeding risk: Supratherapeutic INR")
     if "troponin" in report_lower and "elevated" in report_lower:
@@ -93,9 +113,9 @@ def mock_extract_findings(report_text):
     risk_dimensions = {
         "Cardiac": 70 if "chest pain" in report_lower or "troponin" in report_lower else 20,
         "Metabolic": 80 if "diabetes" in report_lower or "hba1c" in report_lower else 30,
-        "Infection": 85 if "fever" in report_lower or "rash" in report_lower else 15,
+        "Infection": 85 if "fever" in report_lower or "rash" in report_lower or high_wbc else 15,
         "Medication": 60 if "warfarin" in report_lower or "inr" in report_lower else 10,
-        "Neurological": 50 if "stroke" in report_lower or "confusion" in report_lower else 10,
+        "Neurological": 75 if "neck stiffness" in report_lower or "photophobia" in report_lower else 10,
     }
     
     # Determine report type
@@ -139,17 +159,21 @@ def mock_analyze_risk(findings):
         overall_risk = "LOW"
     
     # Special cases for critical
-    if "fever" in str(findings) and "rash" in str(findings):
-        overall_risk = "CRITICAL"
-        risk_score = 92
+    findings_str = str(findings)
+    if "fever" in findings_str and "rash" in findings_str:
+        if "neck stiffness" in findings_str or "hypotension" in findings_str:
+            overall_risk = "CRITICAL"
+            risk_score = 94
     
     # Generate reasoning
     reasoning = ""
-    if "Cardiac" in dims and dims["Cardiac"] > 60:
+    if findings.get("risk_dimensions", {}).get("Cardiac", 0) > 60:
         reasoning = "Patient presents with cardiac risk factors including elevated troponin and chest pain. Combined with metabolic syndrome, this suggests possible acute coronary syndrome."
-    elif "Infection" in dims and dims["Infection"] > 70:
-        reasoning = "High fever with rash and rapid deterioration suggests possible meningococcal infection. Neurological symptoms (neck stiffness, photophobia) increase urgency."
-    elif "Metabolic" in dims and dims["Metabolic"] > 70:
+    elif findings.get("risk_dimensions", {}).get("Infection", 0) > 70:
+        reasoning = "High fever with rash and meningeal signs suggests possible meningococcal infection. Hypotension indicates hemodynamic compromise - this is a medical emergency."
+    elif findings.get("risk_dimensions", {}).get("Neurological", 0) > 60:
+        reasoning = "Neurological symptoms including neck stiffness and photophobia raise concern for meningitis. Requires immediate evaluation."
+    elif findings.get("risk_dimensions", {}).get("Metabolic", 0) > 70:
         reasoning = "Poorly controlled diabetes (HbA1c >9%) with elevated glucose and multiple comorbidities increases risk of complications."
     else:
         reasoning = "Multiple risk factors identified requiring clinical correlation. Patient would benefit from comprehensive evaluation."
@@ -161,18 +185,25 @@ def mock_analyze_risk(findings):
     
     # Recommended actions
     recommended_actions = []
-    if "Cardiac" in dims and dims["Cardiac"] > 60:
+    risk_dims = findings.get("risk_dimensions", {})
+    if risk_dims.get("Cardiac", 0) > 60:
         recommended_actions.append("Cardiology consult within 24 hours")
         recommended_actions.append("Serial troponin and ECG monitoring")
-    if "Infection" in dims and dims["Infection"] > 70:
+    if risk_dims.get("Infection", 0) > 70:
         recommended_actions.append("Immediate infectious disease evaluation")
         recommended_actions.append("Blood cultures and empiric antibiotics")
-    if "Metabolic" in dims and dims["Metabolic"] > 70:
+    if risk_dims.get("Neurological", 0) > 60:
+        recommended_actions.append("Neurology consult urgently")
+        recommended_actions.append("Lumbar puncture if no contraindication")
+    if risk_dims.get("Metabolic", 0) > 70:
         recommended_actions.append("Endocrinology referral for diabetes management")
         recommended_actions.append("Diabetes education and medication adjustment")
     if not recommended_actions:
         recommended_actions.append("Follow up with primary care within 1-2 weeks")
         recommended_actions.append("Monitor symptoms and return if worsens")
+    
+    # Add disclaimer
+    recommended_actions.append("This is a decision-support tool. Clinical judgment required.")
     
     return {
         "overall_risk": overall_risk,
@@ -197,36 +228,37 @@ The AI has identified {len(findings.get('risk_flags', []))} risk flags and assig
 ## ⚠️ Key Findings & Why They Matter
 
 """
-    for flag in findings.get('risk_flags', [])[:3]:
-        explanation += f"- **{flag}** — This combination of findings requires prompt clinical attention.\n"
+    for flag in findings.get('risk_flags', [])[:4]:
+        explanation += f"- **{flag}**\n"
     
     explanation += f"""
 ## 🔍 AI Reasoning Transparency
 
-> {risk['reasoning']}
+{risk['reasoning']}
 
 The risk assessment is based on:
-- Presence of {len(findings.get('diagnoses', []))} active diagnoses
-- {len(findings.get('medications', []))} medications identified
+- {len(findings.get('diagnoses', []))} active diagnoses identified
+- {len(findings.get('medications', []))} medications detected
 - {len(findings.get('lab_results', {}))} laboratory values analyzed
+- {len(findings.get('vital_signs', {}))} vital signs reviewed
 
 ## 💊 Suggested Clinical Actions
 
 """
-    for action in risk.get('recommended_actions', [])[:3]:
+    for action in risk.get('recommended_actions', [])[:4]:
         explanation += f"- {action}\n"
     
     explanation += f"""
 ## ⚡ Confidence & Limitations
 
-**Confidence:** {risk['confidence']}
+**Confidence Level:** {risk['confidence']}
 
 *The AI's confidence is based on pattern matching against known clinical presentations. 
 This analysis is limited to information explicitly mentioned in the report. 
-Missing data would affect accuracy.*
+Missing data (e.g., allergies, family history) would affect accuracy.*
 
 ---
-*This is a decision-support tool only. Clinical judgment required.*
+*This is a decision-support tool only. Final clinical judgment required.*
 """
     return explanation
 
@@ -266,7 +298,7 @@ NOTE: Increasing right leg pain and swelling. Confused this morning.
 with st.sidebar:
     st.markdown("# 🏥 MedGuard-XAI")
     st.markdown("**DEMO MODE** — No API Key Required")
-    st.caption("Mock AI for demonstration. Real version uses GPT-4.")
+    st.caption("Mock AI for demonstration. Real version uses GPT-4o-mini.")
     st.markdown("---")
     
     sample = st.selectbox("Load Sample Report", list(SAMPLE_REPORTS.keys()))
@@ -287,6 +319,8 @@ with st.sidebar:
                     "explanation": explanation,
                     "time": datetime.now().strftime("%H:%M")
                 }
+                if "history" not in st.session_state:
+                    st.session_state.history = []
                 st.session_state.history.insert(0, st.session_state.current)
                 st.rerun()
     
@@ -299,7 +333,7 @@ with st.sidebar:
 st.markdown("# 🏥 MedGuard-XAI")
 st.markdown("### Clinical Risk Intelligence Dashboard")
 
-if "current" not in st.session_state or not st.session_state.current:
+if "current" not in st.session_state or st.session_state.current is None:
     st.info("👈 Select a sample report or paste your own, then click **Analyze Report**")
     st.stop()
 
@@ -309,19 +343,19 @@ risk = d["risk"]
 score = risk["risk_score"]
 level = risk["overall_risk"]
 
-risk_color = {"LOW": "🟢", "MODERATE": "🟡", "HIGH": "🔴", "CRITICAL": "🚨"}.get(level, "⚪")
+risk_emoji = {"LOW": "🟢", "MODERATE": "🟡", "HIGH": "🔴", "CRITICAL": "🚨"}.get(level, "⚪")
 
-c1, c2, c3, c4 = st.columns(4)
-with c1: st.metric("Risk Score", f"{score}/100")
-with c2: st.metric("Risk Level", f"{risk_color} {level}")
-with c3: st.metric("Risk Flags", len(findings.get("risk_flags", [])))
-with c4: st.metric("Confidence", risk.get("confidence", "MEDIUM"))
+col1, col2, col3, col4 = st.columns(4)
+with col1: st.metric("Risk Score", f"{score}/100")
+with col2: st.metric("Risk Level", f"{risk_emoji} {level}")
+with col3: st.metric("Risk Flags", len(findings.get("risk_flags", [])))
+with col4: st.metric("Confidence", risk.get("confidence", "MEDIUM"))
 
 st.markdown("---")
 
-col1, col2 = st.columns(2)
+col_left, col_right = st.columns(2)
 
-with col1:
+with col_left:
     st.markdown("### 🧬 Extracted Findings")
     findings_data = []
     if findings.get("patient_age"): findings_data.append({"Field": "Age", "Value": findings["patient_age"]})
@@ -329,23 +363,43 @@ with col1:
     if findings.get("chief_complaint"): findings_data.append({"Field": "Chief Complaint", "Value": findings["chief_complaint"][:80]})
     for dx in findings.get("diagnoses", []): findings_data.append({"Field": "Diagnosis", "Value": dx})
     for med in findings.get("medications", []): findings_data.append({"Field": "Medication", "Value": med})
+    for lab, val in findings.get("lab_results", {}).items(): findings_data.append({"Field": f"Lab: {lab}", "Value": val})
     if findings_data:
         st.dataframe(pd.DataFrame(findings_data), use_container_width=True, hide_index=True)
+    else:
+        st.info("No structured findings extracted")
 
-with col2:
-    st.markdown("### 🎯 Risk Radar")
+with col_right:
+    st.markdown("### 🎯 Risk Radar Chart")
     dims = findings.get("risk_dimensions", {})
-    if dims:
+    if dims and any(dims.values()):
         fig = go.Figure(data=go.Scatterpolar(
-            r=list(dims.values()), theta=list(dims.keys()), fill="toself",
-            line=dict(color="#f85149" if level in ["HIGH", "CRITICAL"] else "#3fb950", width=2)
+            r=list(dims.values()), 
+            theta=list(dims.keys()), 
+            fill="toself",
+            line=dict(color="#f85149" if level in ["HIGH", "CRITICAL"] else "#d29922" if level == "MODERATE" else "#3fb950", width=2)
         ))
-        fig.update_layout(polar=dict(radialaxis=dict(range=[0, 100])), height=280, margin=dict(l=30, r=30))
+        fig.update_layout(
+            polar=dict(radialaxis=dict(range=[0, 100], tickfont=dict(size=10))),
+            height=300,
+            margin=dict(l=40, r=40, t=20, b=20)
+        )
         st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Risk dimensions will appear after analysis")
+    
+    st.markdown("### ⚠️ Risk Flags")
+    for flag in findings.get("risk_flags", [])[:3]:
+        st.markdown(f"- 🚩 {flag}")
 
 st.markdown("---")
-st.markdown("### 💡 Clinical Explanation")
+
+st.markdown("### 💡 AI Clinical Explanation (XAI)")
 st.markdown(d["explanation"])
 
 st.markdown("---")
-st.caption("⚠️ **Medical Disclaimer:** Decision-support tool only. Clinical judgment required.")
+st.caption("""
+⚠️ **Medical Disclaimer:** MedGuard-XAI is a research prototype and decision-support tool only. 
+All outputs must be reviewed and validated by a licensed physician. 
+Not for clinical use without human oversight.
+""")
