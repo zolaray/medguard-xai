@@ -13,7 +13,7 @@ from datetime import datetime
 st.set_page_config(page_title="MedGuard-XAI", page_icon="🏥", layout="wide")
 
 # ============================================================
-# INITIALIZE SESSION STATE (FIXED)
+# INITIALIZE SESSION STATE
 # ============================================================
 if "history" not in st.session_state:
     st.session_state.history = []
@@ -100,7 +100,7 @@ def mock_extract_findings(report_text):
         risk_flags.append("Infectious risk: Fever with rash - urgent evaluation needed")
     if "neck stiffness" in report_lower or "photophobia" in report_lower:
         risk_flags.append("Neurological risk: Meningeal signs present")
-    if "hypotension" in report_lower or "bp" in report_lower and "95" in report_lower:
+    if "hypotension" in report_lower or ("bp" in report_lower and "95" in report_lower and "60" in report_lower):
         risk_flags.append("Hemodynamic risk: Hypotension suggestive of sepsis")
     if "inr" in report_lower and ("3." in report_lower or "high" in report_lower):
         risk_flags.append("Bleeding risk: Supratherapeutic INR")
@@ -109,11 +109,11 @@ def mock_extract_findings(report_text):
     if "hba1c" in report_lower and "9" in report_lower:
         risk_flags.append("Metabolic risk: Poorly controlled diabetes")
     
-    # Risk dimensions
+    # Risk dimensions - FIXED LINE
     risk_dimensions = {
         "Cardiac": 70 if "chest pain" in report_lower or "troponin" in report_lower else 20,
         "Metabolic": 80 if "diabetes" in report_lower or "hba1c" in report_lower else 30,
-        "Infection": 85 if "fever" in report_lower or "rash" in report_lower or high_wbc else 15,
+        "Infection": 85 if ("fever" in report_lower or "rash" in report_lower or "wbc" in report_lower) else 15,
         "Medication": 60 if "warfarin" in report_lower or "inr" in report_lower else 10,
         "Neurological": 75 if "neck stiffness" in report_lower or "photophobia" in report_lower else 10,
     }
@@ -143,14 +143,12 @@ def mock_extract_findings(report_text):
 
 def mock_analyze_risk(findings):
     """Simulate risk analysis based on findings"""
-    # Calculate risk score based on flags and dimensions
     flags_count = len(findings.get("risk_flags", []))
     dims = findings.get("risk_dimensions", {})
     avg_risk = sum(dims.values()) / len(dims) if dims else 0
     
     risk_score = min(100, int(avg_risk * 0.7 + flags_count * 8))
     
-    # Determine risk level
     if risk_score >= 70:
         overall_risk = "HIGH"
     elif risk_score >= 40:
@@ -158,7 +156,6 @@ def mock_analyze_risk(findings):
     else:
         overall_risk = "LOW"
     
-    # Special cases for critical
     findings_str = str(findings)
     if "fever" in findings_str and "rash" in findings_str:
         if "neck stiffness" in findings_str or "hypotension" in findings_str:
@@ -166,7 +163,6 @@ def mock_analyze_risk(findings):
             risk_score = 94
     
     # Generate reasoning
-    reasoning = ""
     if findings.get("risk_dimensions", {}).get("Cardiac", 0) > 60:
         reasoning = "Patient presents with cardiac risk factors including elevated troponin and chest pain. Combined with metabolic syndrome, this suggests possible acute coronary syndrome."
     elif findings.get("risk_dimensions", {}).get("Infection", 0) > 70:
@@ -178,12 +174,10 @@ def mock_analyze_risk(findings):
     else:
         reasoning = "Multiple risk factors identified requiring clinical correlation. Patient would benefit from comprehensive evaluation."
     
-    # Primary concerns
     primary_concerns = findings.get("risk_flags", [])[:3]
     if not primary_concerns:
         primary_concerns = ["Routine monitoring recommended"]
     
-    # Recommended actions
     recommended_actions = []
     risk_dims = findings.get("risk_dimensions", {})
     if risk_dims.get("Cardiac", 0) > 60:
@@ -202,7 +196,6 @@ def mock_analyze_risk(findings):
         recommended_actions.append("Follow up with primary care within 1-2 weeks")
         recommended_actions.append("Monitor symptoms and return if worsens")
     
-    # Add disclaimer
     recommended_actions.append("This is a decision-support tool. Clinical judgment required.")
     
     return {
